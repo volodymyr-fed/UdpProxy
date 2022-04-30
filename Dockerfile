@@ -17,4 +17,5 @@ WORKDIR /app
 COPY --from=build /app/Proxy/out ./
 
 ENV ASPNETCORE_URLS http://*:$PORT
+ENV UdpOptions__PortToListen $PORT
 ENTRYPOINT ["dotnet", "Proxy.dll"]
