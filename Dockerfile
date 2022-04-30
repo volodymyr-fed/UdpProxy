@@ -16,5 +16,4 @@ FROM mcr.microsoft.com/dotnet/aspnet:6.0.4-alpine3.15-amd64 AS runtime
 WORKDIR /app
 COPY --from=build /app/Proxy/out ./
 
-ENV ASPNETCORE_URLS http://*:$PORT
 ENTRYPOINT ["dotnet", "Proxy.dll"]
