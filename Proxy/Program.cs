@@ -1,29 +1,46 @@
-using Microsoft.Extensions.Options;
+using System.Text.Json;
+using System.Threading.Channels;
+
+using Polly;
+using Polly.Extensions.Http;
 
 using Proxy;
 
-using System.Net;
+using Refit;
 
-var port = Environment.GetEnvironmentVariable("PORT");
-string? url = null;
-if (!string.IsNullOrEmpty(port))
-{
-	Environment.SetEnvironmentVariable("UdpOptions__PortToListen", port);
-	url = $"http://*:{port}";
-}
-
-var builder = WebApplication.CreateBuilder(args);
+var builder = Host.CreateApplicationBuilder(args);
 
 var configuration = builder.Configuration
+	.AddCommandLine(args)
 	.AddEnvironmentVariables()
 	.Build();
 
+var host = configuration["UdpOptions:DomainToPull"]!;
+var channel = Channel.CreateUnbounded<byte[]>();
+
 builder.Services
 	.Configure<UdpOptions>(configuration.GetSection(nameof(UdpOptions)))
+	.AddRefitClient<IUdpPacketsClient>(new RefitSettings
+	{
+		ContentSerializer = new SystemTextJsonContentSerializer(new JsonSerializerOptions
+		{
+			Converters = { new JsonToByteArrayConverter() }
+		})
+	})
+	.ConfigureHttpClient(c =>
+	{
+		c.BaseAddress = new Uri(host);
+	})
+	.AddPolicyHandler(HttpPolicyExtensions
+		.HandleTransientHttpError()
+		.WaitAndRetryAsync(6, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+
+builder.Services
+	.AddSingleton(channel.Reader)
+	.AddSingleton(channel.Writer)
+	.AddHostedService<UdpPacketsProducer>()
 	.AddHostedService<UdpHostedService>();
 
 var app = builder.Build();
 
-app.MapGet("/", (IOptions<UdpOptions> options) => string.Join(Environment.NewLine, Dns.GetHostAddresses(options.Value.MyDomain).Select(x => x.ToString())));
-
-app.Run(url);
+await app.RunAsync();

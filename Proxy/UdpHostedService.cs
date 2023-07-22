@@ -1,48 +1,32 @@
-﻿using Microsoft.Extensions.Options;
-
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
+using System.Threading.Channels;
 
-namespace Proxy
+using Microsoft.Extensions.Options;
+
+namespace Proxy;
+
+sealed class UdpHostedService : BackgroundService
 {
-	public class UdpHostedService : IHostedService
+	readonly UdpOptions options;
+	readonly ChannelReader<byte[]> channelReader;
+
+	public UdpHostedService(ChannelReader<byte[]> channelReader, IOptions<UdpOptions> options)
 	{
-		readonly CancellationTokenSource cancellationTokenSource = new();
-		readonly UdpOptions options;
-		readonly ILogger<UdpHostedService> logger;
+		this.channelReader = channelReader;
+		this.options = options.Value;
+	}
 
-		public UdpHostedService(IOptions<UdpOptions> options, ILogger<UdpHostedService> logger)
+	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+	{
+		var endpointToSend = new IPEndPoint(IPAddress.Parse(options.IpToForward), options.PortToForward);
+		using var udpClient = new UdpClient();
+
+		while (!stoppingToken.IsCancellationRequested)
 		{
-			this.options = options.Value;
-			this.logger = logger;
-		}
+			var receivedPacket = await channelReader.ReadAsync(stoppingToken);
 
-		public Task StartAsync(CancellationToken cancellationToken)
-		{
-			logger.LogInformation(options.ToString());
-
-			Task.Run(Forward, cancellationToken);
-
-			return Task.CompletedTask;
-		}
-
-		public Task StopAsync(CancellationToken cancellationToken)
-		{
-			cancellationTokenSource.Cancel();
-			return Task.CompletedTask;
-		}
-
-		public async Task Forward()
-		{
-			var endpointToSend = new IPEndPoint(IPAddress.Parse(options.IpToForward), options.PortToForward);
-			var udpClient = new UdpClient(options.PortToListen);
-
-			while (!cancellationTokenSource.IsCancellationRequested)
-			{
-				var receive = await udpClient.ReceiveAsync(cancellationTokenSource.Token);
-
-				await udpClient.SendAsync(receive.Buffer, endpointToSend, cancellationTokenSource.Token);
-			}
+			await udpClient.SendAsync(receivedPacket, endpointToSend, stoppingToken);
 		}
 	}
 }
