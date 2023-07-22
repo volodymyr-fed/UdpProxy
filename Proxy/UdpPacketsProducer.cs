@@ -1,36 +1,44 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers;
+using System.Net.WebSockets;
 using System.Threading.Channels;
+
+using Microsoft.Extensions.Options;
 
 namespace Proxy;
 
 sealed class UdpPacketsProducer : BackgroundService
 {
-	readonly IUdpPacketsClient udpPacketsClient;
+	const int BufferSize = 4096;
 	readonly ChannelWriter<byte[]> channelWriter;
+	readonly UdpOptions udpOptions;
 
-	public UdpPacketsProducer(IUdpPacketsClient udpPacketsClient, ChannelWriter<byte[]> channelWriter)
+	public UdpPacketsProducer(ChannelWriter<byte[]> channelWriter, IOptions<UdpOptions> udpOptions)
 	{
-		this.udpPacketsClient = udpPacketsClient;
 		this.channelWriter = channelWriter;
+		this.udpOptions = udpOptions.Value;
 	}
 
 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 	{
-		var timespan = Stopwatch.GetTimestamp();
+		using var webSocket = new ClientWebSocket();
+		await webSocket.ConnectAsync(new Uri(udpOptions.DomainToPull), stoppingToken);
 
 		while (!stoppingToken.IsCancellationRequested)
 		{
-			var elapsed = Stopwatch.GetElapsedTime(timespan);
-			var timeToWait = TimeSpan.FromMilliseconds(100).Subtract(elapsed);
+			using var buffer = MemoryPool<byte>.Shared.Rent(BufferSize);
 
-			if(timeToWait > TimeSpan.Zero)
-				await Task.Delay(timeToWait, stoppingToken);
+			var webSocketResult = await webSocket.ReceiveAsync(buffer.Memory, stoppingToken);
 
-			var packets = await udpPacketsClient.GetPacketsAsync(stoppingToken);
-			timespan = Stopwatch.GetTimestamp();
+			if (webSocketResult.MessageType == WebSocketMessageType.Close)
+			{
+				await webSocket.ConnectAsync(new Uri(udpOptions.DomainToPull), stoppingToken);
+				continue;
+			}
 
-			foreach (var packet in packets)
-				await channelWriter.WriteAsync(packet, stoppingToken);
+			if (webSocketResult.MessageType == WebSocketMessageType.Binary)
+			{
+				await channelWriter.WriteAsync(buffer.Memory[..webSocketResult.Count].ToArray(), stoppingToken);
+			}
 		}
 	}
 }
