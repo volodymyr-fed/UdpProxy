@@ -10,15 +10,20 @@ sealed class UdpHostedService : BackgroundService
 {
 	readonly UdpOptions options;
 	readonly ChannelReader<byte[]> channelReader;
+	readonly ILogger<UdpHostedService> logger;
 
-	public UdpHostedService(ChannelReader<byte[]> channelReader, IOptions<UdpOptions> options)
+	public UdpHostedService(ChannelReader<byte[]> channelReader, IOptions<UdpOptions> options, ILogger<UdpHostedService> logger)
 	{
 		this.channelReader = channelReader;
 		this.options = options.Value;
+		this.logger = logger;
 	}
 
 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 	{
+		logger.LogInformation("Sending bytes to {IpToForward}:{PortToForward}",
+			options.IpToForward, options.PortToForward);
+
 		var endpointToSend = new IPEndPoint(IPAddress.Parse(options.IpToForward), options.PortToForward);
 		using var udpClient = new UdpClient();
 
