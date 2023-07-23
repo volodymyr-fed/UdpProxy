@@ -1,6 +1,6 @@
 ﻿namespace Proxy;
 
-public record UdpOptions
+sealed record UdpOptions
 {
 	public string IpToForward { get; set; } = string.Empty;
 	public int PortToForward { get; set; }
