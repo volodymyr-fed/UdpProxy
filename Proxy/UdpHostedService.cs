@@ -1,37 +1,28 @@
-﻿using System.Net;
-using System.Net.Sockets;
-using System.Threading.Channels;
-
-using Microsoft.Extensions.Options;
+﻿using System.Threading.Channels;
+using Proxy.Consumers;
 
 namespace Proxy;
 
 sealed class UdpHostedService : BackgroundService
 {
-	readonly UdpOptions options;
 	readonly ChannelReader<byte[]> channelReader;
-	readonly ILogger<UdpHostedService> logger;
+	readonly IEnumerable<IPacketConsumer> packetConsumers;
 
-	public UdpHostedService(ChannelReader<byte[]> channelReader, IOptions<UdpOptions> options, ILogger<UdpHostedService> logger)
+	public UdpHostedService(ChannelReader<byte[]> channelReader, IEnumerable<IPacketConsumer> packetConsumers)
 	{
 		this.channelReader = channelReader;
-		this.options = options.Value;
-		this.logger = logger;
+		this.packetConsumers = packetConsumers;
 	}
 
 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 	{
-		logger.LogInformation("Sending bytes to {IpToForward}:{PortToForward}",
-			options.IpToForward, options.PortToForward);
-
-		var endpointToSend = new IPEndPoint(IPAddress.Parse(options.IpToForward), options.PortToForward);
-		using var udpClient = new UdpClient();
 
 		while (!stoppingToken.IsCancellationRequested)
 		{
 			var receivedPacket = await channelReader.ReadAsync(stoppingToken);
 
-			await udpClient.SendAsync(receivedPacket, endpointToSend, stoppingToken);
+			foreach (var consumer in packetConsumers)
+				await consumer.Consume(receivedPacket, stoppingToken);
 		}
 	}
 }
