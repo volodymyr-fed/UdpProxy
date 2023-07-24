@@ -15,17 +15,20 @@ sealed class StatusLineUpdater
 		var statusString = $"Forwarding bytes from {options.DomainToPull} to {options.IpToForward}:{options.PortToForward}. Forwarded: {GetByteString(0)}";
 		bytesInfoPosition = statusString.LastIndexOf(":") + 2;
 		bytesStringLength = statusString.Length - bytesInfoPosition;
-		Console.Write(statusString);
+		Console.WriteLine(statusString);
 	}
 
 	public void UpdateConsumedBytes(ulong bytesCount)
 	{
 		var bytesString = GetByteString(bytesCount);
+		var cursorLeft = Console.CursorLeft;
+		var cursorTop = Console.CursorTop;
 
 		Console.SetCursorPosition(bytesInfoPosition, 0);
 		Console.Write(EmptyLine, 0, bytesStringLength);
 		Console.SetCursorPosition(bytesInfoPosition, 0);
-		Console.Write(bytesString);
+		Console.WriteLine(bytesString);
+		Console.SetCursorPosition(cursorLeft, cursorTop);
 
 		bytesStringLength = bytesString.Length;
 	}
