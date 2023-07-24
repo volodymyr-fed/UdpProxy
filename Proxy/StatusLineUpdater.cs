@@ -6,6 +6,7 @@ sealed class StatusLineUpdater
 {
 	int bytesInfoPosition = 0;
 	int bytesStringLength = 0;
+	readonly char[] EmptyLine = Enumerable.Repeat(' ', 100).ToArray();
 
 	public void InitStatus(UdpOptions options)
 	{
@@ -22,7 +23,7 @@ sealed class StatusLineUpdater
 		var bytesString = GetByteString(bytesCount);
 
 		Console.SetCursorPosition(bytesInfoPosition, 0);
-		Console.Write(new string(' ', bytesStringLength));
+		Console.Write(EmptyLine, 0, bytesStringLength);
 		Console.SetCursorPosition(bytesInfoPosition, 0);
 		Console.Write(bytesString);
 

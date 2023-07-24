@@ -1,10 +1,7 @@
-﻿using System.Reactive.Linq;
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Options;
-
-using Websocket.Client;
-using Websocket.Client.Models;
 
 namespace Proxy;
 
@@ -24,29 +21,54 @@ sealed class UdpPacketsProducer : BackgroundService
 
 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 	{
-		using var webSocket = new WebsocketClient(new Uri(udpOptions.DomainToPull))
-		{
-			ErrorReconnectTimeout = TimeSpan.FromSeconds(10),
-			IsReconnectionEnabled = true,
-		};
+		var connection = new HubConnectionBuilder()
+			.WithUrl(new Uri(udpOptions.DomainToPull))
+			.WithAutomaticReconnect(new RetryPolicy())
+			.Build();
 
-		webSocket.MessageReceived
-			.Where(msg => msg.Binary is not null && msg.Binary.Length > 0)
-			.Subscribe(async msg => await channelWriter.WriteAsync(msg.Binary, stoppingToken));
+		connection.Reconnected += OnReconection;
+		await ConnectWithRetryAsync(connection, stoppingToken);
 
-		webSocket.ReconnectionHappened
-			.Subscribe(OnReconection);
+		if (stoppingToken.IsCancellationRequested)
+			return;
 
-		await webSocket.Start();
+		connection.On<byte[]>("ReceiveBytes", async bytes => await channelWriter.WriteAsync(bytes));
 
 		logger.LogInformation("Connected to server {ServerUrl}.", udpOptions.DomainToPull);
-
-		await Task.Delay(Timeout.Infinite, stoppingToken);
 	}
 
-	void OnReconection(ReconnectionInfo reconnectionInfo)
+	Task OnReconection(string? _)
 	{
-		if (reconnectionInfo.Type != ReconnectionType.Initial && reconnectionInfo.Type != ReconnectionType.NoMessageReceived)
-			logger.LogInformation("Reconnected to server {ServerUrl}.", udpOptions.DomainToPull);
+		logger.LogInformation("Reconnected to server {ServerUrl}.", udpOptions.DomainToPull);
+
+		return Task.CompletedTask;
+	}
+
+	static async Task<bool> ConnectWithRetryAsync(HubConnection connection, CancellationToken token)
+	{
+		while (true)
+		{
+			try
+			{
+				await connection.StartAsync(token);
+				return true;
+			}
+			catch when (token.IsCancellationRequested)
+			{
+				return false;
+			}
+			catch
+			{
+				await Task.Delay(5000, token);
+			}
+		}
+	}
+}
+
+sealed class RetryPolicy : IRetryPolicy
+{
+	public TimeSpan? NextRetryDelay(RetryContext retryContext)
+	{
+		return TimeSpan.FromSeconds(5);
 	}
 }
