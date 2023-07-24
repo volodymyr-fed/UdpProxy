@@ -26,18 +26,18 @@ sealed class UdpPacketsProducer : BackgroundService
 			.WithAutomaticReconnect(new RetryPolicy())
 			.Build();
 
-		connection.Reconnected += OnReconection;
-		await ConnectWithRetryAsync(connection, stoppingToken);
+		connection.Reconnected += OnReconnection;
+		connection.On<byte[]>("ReceiveBytes", async bytes => await channelWriter.WriteAsync(bytes));
 
+		await ConnectWithRetryAsync(connection, stoppingToken);
 		if (stoppingToken.IsCancellationRequested)
 			return;
 
-		connection.On<byte[]>("ReceiveBytes", async bytes => await channelWriter.WriteAsync(bytes));
-
 		logger.LogInformation("Connected to server {ServerUrl}.", udpOptions.DomainToPull);
+		await Task.Delay(Timeout.Infinite, stoppingToken);
 	}
 
-	Task OnReconection(string? _)
+	Task OnReconnection(string? _)
 	{
 		logger.LogInformation("Reconnected to server {ServerUrl}.", udpOptions.DomainToPull);
 
