@@ -1,48 +1,28 @@
-﻿using Microsoft.Extensions.Options;
+﻿using System.Threading.Channels;
+using Proxy.Consumers;
 
-using System.Net;
-using System.Net.Sockets;
+namespace Proxy;
 
-namespace Proxy
+sealed class UdpHostedService : BackgroundService
 {
-	public class UdpHostedService : IHostedService
+	readonly ChannelReader<byte[]> channelReader;
+	readonly IEnumerable<IPacketConsumer> packetConsumers;
+
+	public UdpHostedService(ChannelReader<byte[]> channelReader, IEnumerable<IPacketConsumer> packetConsumers)
 	{
-		readonly CancellationTokenSource cancellationTokenSource = new();
-		readonly UdpOptions options;
-		readonly ILogger<UdpHostedService> logger;
+		this.channelReader = channelReader;
+		this.packetConsumers = packetConsumers;
+	}
 
-		public UdpHostedService(IOptions<UdpOptions> options, ILogger<UdpHostedService> logger)
+	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+	{
+
+		while (!stoppingToken.IsCancellationRequested)
 		{
-			this.options = options.Value;
-			this.logger = logger;
-		}
+			var receivedPacket = await channelReader.ReadAsync(stoppingToken);
 
-		public Task StartAsync(CancellationToken cancellationToken)
-		{
-			logger.LogInformation(options.ToString());
-
-			Task.Run(Forward, cancellationToken);
-
-			return Task.CompletedTask;
-		}
-
-		public Task StopAsync(CancellationToken cancellationToken)
-		{
-			cancellationTokenSource.Cancel();
-			return Task.CompletedTask;
-		}
-
-		public async Task Forward()
-		{
-			var endpointToSend = new IPEndPoint(IPAddress.Parse(options.IpToForward), options.PortToForward);
-			var udpClient = new UdpClient(options.PortToListen);
-
-			while (!cancellationTokenSource.IsCancellationRequested)
-			{
-				var receive = await udpClient.ReceiveAsync(cancellationTokenSource.Token);
-
-				await udpClient.SendAsync(receive.Buffer, endpointToSend, cancellationTokenSource.Token);
-			}
+			foreach (var consumer in packetConsumers)
+				await consumer.Consume(receivedPacket, stoppingToken);
 		}
 	}
 }

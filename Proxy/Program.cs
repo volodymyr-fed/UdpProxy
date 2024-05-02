@@ -1,22 +1,34 @@
+using System.Threading.Channels;
+
 using Microsoft.Extensions.Options;
 
 using Proxy;
+using Proxy.Consumers;
 
-using System.Net;
-
-var builder = WebApplication.CreateBuilder(args);
+var builder = Host.CreateApplicationBuilder(args);
 
 var configuration = builder.Configuration
+	.AddCommandLine(args)
 	.AddEnvironmentVariables()
 	.Build();
 
+var host = configuration["UdpOptions:DomainToPull"]!;
+var bytesChannel = Channel.CreateUnbounded<byte[]>();
+
+var statusLineUpdater = new StatusLineUpdater();
+
 builder.Services
 	.Configure<UdpOptions>(configuration.GetSection(nameof(UdpOptions)))
+	.AddSingleton(bytesChannel.Reader)
+	.AddSingleton(bytesChannel.Writer)
+	.AddSingleton<IPacketConsumer, UdpSender>()
+	.AddSingleton<IPacketConsumer, BytesForwardedConsumer>()
+	.AddSingleton(statusLineUpdater)
+	.AddHostedService<UdpPacketsProducer>()
 	.AddHostedService<UdpHostedService>();
 
 var app = builder.Build();
 
-app.MapGet("/", (IOptions<UdpOptions> options) => string.Join(Environment.NewLine, Dns.GetHostAddresses(options.Value.MyDomain).Select(x => x.ToString())));
+statusLineUpdater.InitStatus(app.Services.GetRequiredService<IOptions<UdpOptions>>().Value);
 
-app.Run();
-
+await app.RunAsync();
